@@ -1,0 +1,489 @@
+---
+title: TO PREDICT BURNED AREA IN THE FOREST
+author: PUSHKAR SHARMA
+date: April 28, 2022
+output:
+  word_document: default
+  prettydoc::html_pretty:
+    theme: cayman
+---
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+**Statement of the research question and of the objective of regression modeling**
+ 
+We are trying to check whether there is a linear relationship between the metrological factors and the forest area burned.
+
+**Description of the data**
+
+
+Number of Instances: 517
+
+Number of Attributes: 13
+
+Output variable: 1
+
+
+
+**Attribute Description**
+
+1. X - x-axis spatial coordinate within the Montesinho park map: 1 to 9
+
+2. Y - y-axis spatial coordinate within the Montesinho park map: 2 to 9
+
+3. month - month of the year: 'Jan' to 'Dec'
+
+4. day - day of the week: 'Mon' to 'Sun'
+
+5. FFMC - FFMC index from the FWI system: 18.7 to 96.20 (Fine Fuel Moisture Code) :- FFMC denotes the moisture content surface litter and influences ignition and fire spread.
+
+6. DMC - DMC index from the FWI system: 1.1 to 291.3
+
+(Duff Moisture Code):- Represents the moisture content of shallow and deep organic layers.
+
+7. DC - DC index from the FWI system: 7.9 to 860.6
+
+8. ISI - ISI index from the FWI system: 0.0 to 56.10(Initial Spread Index):-The ISI is a score that correlates with fire velocity spread.
+
+9. temp - temperature in Celsius degrees: 2.2 to 33.30
+
+10. RH - relative humidity in %: 15.0 to 100
+
+11. wind - wind speed in km/h: 0.40 to 9.40
+
+12. rain - outside rain in mm/m2 : 0.0 to 6.4
+
+13. area - the burned area of the forest (in ha): 0.00 to 1090.84 (TO BE PREDICTED)
+
+```{r, echo=FALSE }
+library(corrplot)
+library(ggplot2)
+library(car)
+library(perturbR)
+library(MASS)
+```
+
+```{r , echo=FALSE}
+#Reading Data file
+forest <- read.csv("forestfires.csv")
+# Dimensions and variables of data set
+dim(forest)
+colnames(forest)
+```
+
+## LINEAR MODEL FROM SCRATCH
+
+```{r , echo=FALSE}
+fig.width = 15
+fig.height = 10
+ones=rep(1,517)
+y<-forest[13]
+x<-cbind(ones,forest[1], forest[2],forest[5],forest[6],forest[7],forest[8],forest[9],forest[10],forest[11],forest[12])
+x=array(x)
+y=array(y)
+train_idx = sample(1:nrow(x), 0.8*nrow(x))
+#train_idx
+x_train=as.matrix(x[train_idx, ])#training sample
+y_train=as.matrix(y[train_idx, ])#training sample
+
+x_test=as.matrix(x[-train_idx, ])#test sample
+y_test=as.matrix(y[-train_idx, ])#test sample
+
+
+w=solve(t(x_train) %*% x_train)%*%(t(x_train) %*% y_train) 
+w=as.matrix(w)#weight matrix
+head(w,5)
+y_pred=x_test%*%w
+head(y_pred,5)
+head(y_test,5)
+sqrt(sum((y_pred-y_test)**2)/155)
+x_train_first<-x_train[,-1]
+```
+
+## LINEAR MODEL USING lm
+```{r, echo=FALSE }
+linear_model <- lm(y_train~x_train_first)
+#print(w)
+#coef(linear_model)
+#w and coefficient are coming out same so the result from the scratch function and the lm is same
+summary(linear_model)
+plot(linear_model)
+```
+
+coef(linear_model)
+w and coefficient are coming out same so the result from the scratch function and the lm is same
+
+**As P-value are very high for all the features vector so this seams that the basic linear model is not a good option to train the data so we will try to do EDA and then after seeing the plot we will try to do some transformation and try to improve the model**
+
+```{r, echo=FALSE }
+sum(is.na(forest))#if any missing values
+summary(forest)
+# No missing values. Month and day are as factors. 
+# From Summary FFMC, DMC and DC seem left skewed.
+# ISI , Rain may be right skewed. Area heavily right skewed
+
+# Splitting data into training and test set
+set.seed(30032017)
+row_number<- sample(1:nrow(forest), size=0.2*nrow(forest))
+forest_test<-  forest[row_number,]
+dim(forest_test) ## Size of the testing set
+forest_train<- forest[-row_number,]
+dim(forest_train)  ## Size of training set
+summary(forest_train)
+```
+
+No missing values. Month and day are as factors. 
+From Summary FFMC, DMC and DC seem left skewed.
+ISI , Rain may be right skewed. Area heavily right skewed
+
+
+## Exploratory data analysis
+```{r , echo=FALSE}
+# Now we check the correlation matrix
+M <- cor(forest_train[,-c(3,4)])
+M
+
+# And the correlation plot to visualize the correlation between variables in training data
+corrplot(M,method='number')
+```
+
+evident positive corr between DC & DMC,ISI & FFMC , X &Y , temp & DC.
+negative corr between RH & temp.
+
+positive DC & DMC - this as per definition makes sense 
+positive temp & DMC - This somewhat does not makes much sense as moisture should decrease with temp
+negative RH & temp - This is also natural as temp increases humidity decreases.
+
+# We then inspect the distribution of each variable in box plots
+
+```{r , echo=FALSE}
+boxplot(forest_train$X,main="X",col ="violet")
+boxplot(forest_train$Y,main ='Y',col ="red")
+boxplot(forest_train$FFMC, main='FFMC',col ="green") #outliers
+boxplot(forest_train$DMC, main ='DMC',col="orange") # outliers
+boxplot(forest_train$DC, main='DC',col="blue") # some outliers
+boxplot(forest_train$ISI,main='ISI',col="yellow") # outliers
+boxplot(forest_train$temp, main='temp',col="brown") 
+boxplot(forest_train$RH,main="RH",col="pink") # outliers
+boxplot(forest_train$wind, main='wind',col="magenta") #
+boxplot(forest_train$rain, main='rain',col="violet")  # heavy outliers...high variability in data
+boxplot(forest_train$area, main='area',col="red") # heavy outliers..high variability in data
+```
+asymmetry also observed in variables like X,Y,DC,FFMC
+from box plot we can easily able to see the outliers and it is clearly seen that the rain and area has hogh variablity and very large outliers
+
+#  Let's see the prob density distribution curve of response variable area
+```{r , echo=FALSE}
+dar <- data.frame(x=forest_train$area)
+ggplot(dar,aes(x=forest_train$area))+geom_density(fill='red')
+
+# And density curve for other variables also
+plot(density(forest_train$FFMC),col="red")
+plot(density(forest_train$DMC),col ="violet")
+plot(density(forest_train$DC),col ="green")
+plot(density(forest_train$ISI),col ="orange")
+plot(density(forest_train$temp),col ="blue")   
+plot(density(forest_train$RH),col ="magenta")
+plot(density(forest_train$wind),col ="brown")
+plot(density(forest_train$rain),col ="red")
+plot(density(forest_train$area),col ="violet")
+
+plot(density(log(forest_train$rain)),col="pink") # log
+plot(density(log(forest_train$area)),col="red") # log
+
+## Above box plots and density suggest reflected log transform of FFMC and log transform of rain
+## and area, the response variable since it is highly  concentrated near zero and as symmetrical 
+
+summary(forest_train$area)
+var(forest_train$area)
+sd(forest_train$area)
+
+# The variable distribution is very concentrated around 1 and 10, but we can
+# some extreme outliers , even above 1000 !! 
+```
+Above box plots and density suggest reflected log transform of FFMC and **log transform** of rain
+and area, the response variable since it is highly  concentrated near zero and as symmetrical 
+
+The variable distribution is very concentrated around 1 and 10, but we can
+some extreme outliers , even above 1000 !! 
+
+**Explanation of the modeling approach and choice of model. This should include the model type, model selection procedure, and the interaction terms that you will include in the final model**
+
+_By seeing the EDA some variable show well with log transform now will use all the inference we collected from the EDA and try to make different model and try to increase the R-Square value of the model_ 
+
+# Model 1
+
+
+## We run the first  Basic Model in this i have taken all the features given in the table
+```{r, echo=FALSE }
+mod1 <- lm(area~X+Y+month+day+FFMC+DMC+DC+ISI+temp+RH+wind+rain,data=forest_train)
+
+summary(mod1)
+```
+The R sq is very low at 5.5% and only DMC and DC seems significant regressors
+
+**Diagnostic Plots**
+```{r, echo=FALSE }
+plot(mod1)
+```
+
+There is negative linear relation between Residuals and Fitted values
+QQ plot of residuals is also not linear.
+**this indicates there can be Collinearity problems**
+
+
+**Residual Plots**
+```{r , echo=FALSE}
+# Lets see residual plot with variables.
+residualPlots(mod1)
+```
+The residual plots suggests very significant pattern for fitted values and residuals. 
+Some square transformations in wind, temp, rain, RH is suggested. 
+
+But first we observe that there are many zero values in area which is giving very irregular results.
+
+**FEATURE SELECTION**
+
+```{r, echo=FALSE }
+# install.packages('relaimpo')
+library(relaimpo)
+
+# Build linear regression model
+model_formula = area ~ X+Y+FFMC+DMC+DC+ISI+temp+RH+wind+rain
+lmMod <- lm(model_formula, data=forest)
+
+# calculate relative importance
+relImportance <- calc.relimp(lmMod, type = "lmg", rela = F)  
+
+# Sort
+cat('Relative Importances: \n')
+sort(round(relImportance$lmg, 3), decreasing=TRUE)
+```
+**as the seen from the above the importance of all the features are less so the linear regression is not the better option to fit the data but we can improve this by log transformation**
+
+**now we will remove the rain FFMC and rain and let us what will happen**
+
+## Model 2
+
+```{r, echo=FALSE }
+# Hence , we decided to remove the zero value rows and reduce the dataset and actually run only on 
+## data where there is a burn area.
+
+forest_train <- forest_train[forest_train$area>0,]
+forest_test <- forest_test[forest_test$area>0,]
+
+## Now we run model 2 on reduced subset of data but having  all the features which are given in the question
+
+mod2 <- lm(area~X+Y+month+day+DMC+DC+ISI+temp+RH+wind,data=forest_train)
+
+summary(mod2)
+
+```
+in this we have remove the zero value rows and reduce the data set and actually run only on 
+data where there is a burn area.
+we run model 2 on reduced subset of data but having  all the features which are given in the question
+R sq has significantly improved  11.15 %
+
+**Diagnostic Plots**
+```{r, echo=FALSE }
+plot(mod2)
+```
+
+**Residual Plots**
+```{r, echo=FALSE }
+residualPlots(mod2)
+```
+# the fitted values plot and QQ plot has improved, now we proceed with other transformations
+
+# Model 3
+**Residual Plot**
+**Diagnostic Plots**
+```{r , echo=FALSE}
+# we log transform the FFMC and Rain because we conclude that after doing EDA
+FFMC_ref<- (log(max(forest_train$FFMC)+1-forest_train$FFMC))
+
+Rain_log <- log(forest_train$rain+1)
+
+mod3 <- lm(area~X+Y+month+day+FFMC_ref+DMC+DC+ISI+temp+RH+wind+Rain_log,data=forest_train)
+
+summary(mod3)
+```
+we did the log transform of the FFMC and Rain because we conclude that after doing EDA
+
+**FEATURE IMPORTANCE**
+```{r, echo=FALSE }
+# Build linear regression model
+model_formula = area ~FFMC_ref+DMC+DC+ISI+temp+RH+wind+Rain_log
+lmMod <- lm(model_formula, data=forest_train)
+
+# calculate relative importance
+relImportance <- calc.relimp(lmMod, type = "lmg", rela = F)  
+
+# Sort
+cat('Relative Importances: \n')
+sort(round(relImportance$lmg, 3), decreasing=TRUE)
+```
+
+**Residual Plot**
+```{r , echo=FALSE}
+residualPlots(mod3)
+
+```
+## the model is improved on R sq and residuals also.DMC and DC have emerged as significant
+
+**Diagnostic Plots**
+```{r, echo=FALSE }
+plot(mod3)
+```
+We still need to improve patterns in fitted values and residuals.
+
+## Model 4
+**Residual Plot**
+**Diagnostic Plots**
+```{r , echo=FALSE}
+## we check the box cox for response variable transform
+bc<- boxcox(mod3)
+bc_df = as.data.frame(bc)
+optimal_lambda =  bc_df[which.max(bc$y),1]
+optimal_lambda
+
+## the optimal lambda is very near to zero. Hence log transform is suitable here (with area+1 to counter the zero values)
+
+mod4 <- lm(log(area+1)~X+Y+month+day+FFMC_ref+DMC+DC+ISI+temp+RH+wind+Rain_log,data=forest_train)
+
+summary(mod4)
+
+residualPlots(mod4)
+
+```
+The fitted values vs residual is random now and model prediction is also improved. 
+Lets transform other variables.
+#R-square value=0.1799
+
+## Model 5
+**FINAL  MODEL**
+**Residual Plot**
+**Diagnostic Plots**
+```{r, echo=FALSE }
+
+FFMC__DMC <- forest_train$FFMC*forest_train$DMC
+FFMC__DC <-forest_train$FFMC*forest_train$DC
+FFMC__ISI <-forest_train$FFMC*forest_train$ISI
+DMC__DC<-forest_train$DMC*forest_train$DC
+DMC__ISI<-forest_train$DMC*forest_train$ISI
+DC__ISI<-forest_train$DC*forest_train$ISI
+
+wind_sq<-(forest_train$wind)^2
+temp_sq<-(forest_train$temp)^2
+rain_sq<-(forest_train$rain)^2
+RH_sq<-(forest_train$RH)^2
+
+## We check the interaction also of these factors.
+FFMC__DMC <- forest_train$FFMC*forest_train$DMC
+temp__RH<-(forest_train$temp)*(forest_train$RH)
+wind__rain<-(forest_train$wind)*(forest_train$rain)
+wind__temp<-(forest_train$wind)*(forest_train$temp)
+
+mod5 <- lm(log(area+1)~X+Y+month+day+FFMC+DMC+DC+ISI+FFMC__DMC+FFMC__DC+FFMC__ISI+DMC__DC+DMC__ISI+DC__ISI+
+             temp+temp_sq+RH+RH_sq+wind+wind_sq+Rain_log+rain_sq+temp__RH+wind__rain+wind__temp,data=forest_train)
+
+summary(mod5)
+```
+## in this we did residual improvement of other variables. Hence we try the square of variables
+## which are dense distributed and show some quadratic pattern.Also factors like wind, temp 
+## should have greater impact on fire spread and area
+**Diagnostic Plots**
+```{r , echo=FALSE}
+plot(mod5)
+```
+**Residual Plot**
+```{r , echo=FALSE}
+residualPlots(mod5)
+## the model is improved in terms of  r sq and the residuals are also randomly distributed.
+## We are at optimal model.
+```
+
+## the model is improved in terms of  r sq and the residuals are also randomly distributed.
+## We are at optimal model.
+
+```{r, echo=FALSE }
+
+forest_train[which(row.names(forest_train) %in% c(200,363,416,479,480)),]
+forest_train_new <- forest_train[which(!row.names(forest_train) %in% c(416,480)),]
+```
+## out f these only two are high outliers 416 and and 480. These seem to be burned 
+# due to some other factors, may be intentional !! So we remove two observations.
+
+## Now we test the model
+```{r , echo=FALSE }
+FFMC.DMC <- forest_test$FFMC*forest_test$DMC
+FFMC.DC <-forest_test$FFMC*forest_test$DC
+FFMC.ISI <-forest_test$FFMC*forest_test$ISI
+DC.ISI<-forest_test$DC*forest_test$ISI
+RH_sq<-(forest_test$RH)^2
+testData<-cbind(forest_test,FFMC.DMC,FFMC.DC,FFMC.ISI,DC.ISI,RH_sq)
+
+model <-lm(formula = log(area + 1) ~ X + Y + month + DMC + DC + FFMC.DMC + 
+                FFMC.DC + FFMC.ISI + DC.ISI + RH + RH_sq, data = testData)
+
+
+y_hat<-predict.lm(model,newdata=testData, se.fit=TRUE)$fit
+y_hat<-as.vector(y_hat) 
+dev<-log(testData$area+1)-(y_hat) 
+num<-sum(dev^2) 
+dev1<-log(testData$area+1)-mean(log(testData$area+1)) 
+den<-sum(dev1^2) 
+Predicted_Rsq<-1-(num/den) 
+Predicted_Rsq
+
+
+```
+##The predicted R square is 32.40% This is a considerably good fit as per the given data set.
+
+
+## Running on original data
+```{r, echo=FALSE }
+FFMC_DMC <- forest$FFMC*forest$DMC
+FFMC_DC <-forest$FFMC*forest$DC
+FFMC_ISI <-forest$FFMC*forest$ISI
+DC_ISI<-forest$DC*forest$ISI
+RH_sq<-(forest$RH)^2
+
+
+forest_new<-cbind(forest,FFMC_DMC,FFMC_DC,FFMC_ISI,DC_ISI,RH_sq)
+forest_new <- forest_new[forest_new$area>0,]
+
+
+model_full <-lm(formula = log(area + 1) ~ X + Y + month + DMC + DC + FFMC_DMC + 
+             FFMC_DC + FFMC_ISI + DC_ISI + RH + RH_sq, data = forest_new)
+
+summary(model_full)
+plot(model_full)
+residualPlots(model_full)
+```
+
+**Interpretations and interesting findings**
+
+1.
+_in this we do log transform of some features as shown in above models and also there are many outliers so we remove them and when i am making the model without any transformation then the result which is coming is very poor i.e r square value is very less_
+
+
+
+2.
+_one more interpretation or finding is that, data which i initially assumed that it will best fit the regression line , this hypothesis or assumption is proved to be wrong because r2 square by all transformations and complex part increase to .32 only_
+
+
+
+
+
+**Additional work such as analysis and models that you tried but did not include in the final model**
+
+
+1.
+_I tried to remove the different features without log transformation but the result is coming out to be more worst than my final model_
+
+
+
+2.
+_I tried many classical model on this data they are giving best result compared to MLR_
+
